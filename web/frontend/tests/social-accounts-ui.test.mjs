@@ -25,7 +25,7 @@ const job = (account, outcome, changes = {}) => ({ jobId: account.accountId, pla
 
 async function fixture(t, component = DistributionEditor, props = {}) {
   localStorage.clear();
-  const h = { accounts: [structuredClone(a), structuredClone(b)], batches: [], posts: [], events: [], submit: null, creates: [], requests: [] };
+  const h = { accounts: [structuredClone(a), structuredClone(b)], batches: [], posts: [], events: [], submit: null, creates: [], requests: [], logouts: [] };
   t.mock.method(window, 'confirm', () => true);
   t.mock.method(globalThis, 'fetch', async (url, options = {}) => {
     const path = String(url), body = options.body ? JSON.parse(options.body) : undefined;
@@ -38,7 +38,11 @@ async function fixture(t, component = DistributionEditor, props = {}) {
       h.posts.push(body);
       result = h.submit ? await h.submit(body) : { batchId: 'd'.repeat(32), state: 'running', createdAt: a.updatedAt, jobs: [] };
     } else if (path === '/api/social-accounts/batches') result = h.batches;
-    else if (path.endsWith('/history') || path.endsWith('/default-history')) result = h.events;
+    else if (path.endsWith('/logout') && options.method === 'POST') {
+      const id = path.split('/').at(-2); h.logouts.push(id);
+      h.accounts = h.accounts.map(account => account.accountId === id ? { ...account, status: 'logged_out' } : account);
+      result = h.accounts.find(account => account.accountId === id);
+    } else if (path.endsWith('/history') || path.endsWith('/default-history')) result = h.events;
     else throw new Error(`Unexpected simulated endpoint: ${path}`);
     return { ok: true, json: async () => structuredClone(result) };
   });
@@ -73,6 +77,43 @@ test('account inspector opens the exact selected analysis and publish identity',
   const h=await fixture(t,Accounts,{initialAccountId:a.accountId,onNavigateAnalysis:(...args)=>analysis.push(args),onNavigatePublish:account=>publish.push(account.accountId)});
   await h.click('分析此账号');await h.click('去发布');
   assert.deepEqual(analysis,[[a.platform,a.accountId]]);assert.deepEqual(publish,[a.accountId]);assert.equal(h.posts.length,0);
+});
+
+test('independent exit is outside collapsed details and cancellation preserves every account', async t => {
+  const h = await fixture(t, Accounts, { initialAccountId: a.accountId });
+  const exit = h.container.querySelector('.account-inspector-actions .account-logout-button');
+  assert.equal(exit.textContent, '退出账号');
+  assert.equal(exit.closest('details'), null);
+  assert.equal(h.container.querySelector('.account-identity-details').open, false);
+  t.mock.method(window, 'confirm', () => false);
+  await h.click(exit);
+  assert.deepEqual(h.logouts, []);
+  assert.deepEqual(h.accounts.map(account => account.status), ['ready', 'ready']);
+});
+
+test('confirmed independent exit uses exact account id and keeps another identity on the same platform', async t => {
+  const h = await fixture(t, Accounts, { initialAccountId: a.accountId });
+  const samePlatform = { ...a, accountId: 'c'.repeat(32), label: '同平台乙', externalAccountId: 'c'.repeat(24) };
+  h.accounts.push(samePlatform);
+  await h.click(h.container.querySelector('[aria-label="刷新账号状态"]'));
+  await h.click(h.container.querySelector('.account-inspector-actions .account-logout-button'));
+  assert.deepEqual(h.logouts, [a.accountId]);
+  assert.equal(h.accounts.find(account => account.accountId === a.accountId).status, 'logged_out');
+  assert.equal(h.accounts.find(account => account.accountId === samePlatform.accountId).status, 'ready');
+  assert.equal(h.accounts.find(account => account.accountId === a.accountId).externalAccountId, a.externalAccountId);
+  assert.equal(h.posts.length, 0);
+  await h.click('刷新记录');
+  assert.ok(h.requests.some(request => request.path === `/api/social-accounts/${a.accountId}/history`));
+});
+
+test('busy independent account cannot be logged out from the visible action', async t => {
+  const h = await fixture(t, Accounts, { initialAccountId: a.accountId });
+  h.accounts[0].busy = true;
+  await h.click(h.container.querySelector('[aria-label="刷新账号状态"]'));
+  const exit = h.container.querySelector('.account-inspector-actions .account-logout-button');
+  assert.equal(exit.disabled, true);
+  await h.click(exit);
+  assert.deepEqual(h.logouts, []);
 });
 
 test('sidebar navigation resets filters, reselects the same target, and returns to the full list', async t => {

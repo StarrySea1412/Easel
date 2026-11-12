@@ -44,7 +44,7 @@ type Props = {
   defaultAccounts?: AccountItem[];
   defaultsLoaded?: boolean;
   defaultLoadError?: string;
-  onManageDefault?: (platform: string) => void;
+  onManageDefault?: (platform: string, confirmLogout?: boolean) => void;
   onRefreshDefaults?: () => Promise<void>;
 };
 
@@ -230,7 +230,7 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
           <span className={`account-state-pill is-${selectedDefault.connection === 'online' ? 'ready' : selectedDefault.connection}`}><i/>{defaultState(selectedDefault.platform, selectedDefault.connection)}</span>
           <p className="account-context-note">这是原有默认发布通道的账号，与侧栏平台快照同源。保存的昵称不代表当前在线；默认账号不计入独立账号可分发数量。</p>
           {onNavigateAnalysis&&<button className="btn" onClick={()=>onNavigateAnalysis(selectedDefault.platform)}>分析默认账号</button>}
-          {onManageDefault && <div className="account-inspector-actions"><button className="btn btn-primary" onClick={() => onManageDefault(selectedDefault.platform)}>管理默认账号</button></div>}
+          {onManageDefault && <div className="account-inspector-actions"><button className="btn btn-primary" onClick={() => onManageDefault(selectedDefault.platform)}>管理默认账号</button><button className="btn account-logout-button" onClick={() => onManageDefault(selectedDefault.platform, true)}>退出账号</button></div>}
         </>}
         {selected && <>
           <div className="account-selected-identity"><PlatformIcon platform={selected.platform} name={publishPlatformLabel(selected.platform)}/><div><h3>{selected.label}</h3><p>{publishPlatformLabel(selected.platform)} · {hideIdentity ? '账号身份已隐藏' : selected.name || '昵称待核验'}</p></div></div>
@@ -241,10 +241,11 @@ function AccountManager({ hideIdentity, defaultAccounts = [], defaultsLoaded = t
             <button className="btn btn-primary" disabled={!!busy || selected.busy} onClick={() => void run(selected.accountId, async () => { const login = await socialAccounts.login(selected.accountId); if (alive.current) setLogins(old => ({...old,[selected.accountId]:login})); })}>{selected.status === 'logged_out' ? '连接账号' : '重新连接'}</button>
             <button className="btn" disabled={!!busy || selected.busy} onClick={() => void run(selected.accountId, () => socialAccounts.check(selected.accountId))}>在线核验</button>
             {selected.status === 'connecting' && <button className="btn" disabled={!!busy} onClick={() => void run(selected.accountId, () => socialAccounts.cancel(selected.accountId, selected.attemptId))}>取消本次登录</button>}
+            <button className="btn account-logout-button" disabled={!!busy || selected.busy} onClick={() => { if(window.confirm(`退出「${selected.label}」？只清理该账号登录资料，身份和历史保留。`)) void run(selected.accountId,()=>socialAccounts.logout(selected.accountId)); }}>退出账号</button>
           </div>
           {selected.status === 'connecting' && selectedLogin?.attemptId === selected.attemptId && <div className="social-qr account-inspector-qr"><p>{accountState[selectedLogin.state] || selectedLogin.message || '登录进行中'}</p><ConnectionImage login={selectedLogin} label={selected.label}/>
             {selectedLogin.state === 'sms_required' && selected.platform === 'douyin' && <form onSubmit={event => { event.preventDefault(); void run(selected.accountId, async () => { await socialAccounts.sms(selected.accountId, selected.attemptId, codes[selected.accountId] || ''); setCodes(old => ({...old,[selected.accountId]:''})); }); }}><label>本次登录验证码<input className="field" inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={codes[selected.accountId] || ''} onChange={e => setCodes(old => ({...old,[selected.accountId]:e.target.value.replace(/\D/g,'')}))}/></label><button className="btn" disabled={!!busy}>提交登录验证码</button></form>}<small>仅用于本次连接；请按官方页面提示完成额外验证。</small></div>}
-          <details className="account-identity-details"><summary>账号身份与资料</summary><dl><dt>本地账号编号</dt><dd>{selected.accountId}</dd><dt>平台账号编号</dt><dd>{hideIdentity ? '身份已隐藏' : selected.externalAccountId || '等待在线核验'}</dd><dt>上次在线核验</dt><dd>{selected.checkedAt ? new Date(selected.checkedAt).toLocaleString('zh-CN') : '尚无成功记录'}</dd></dl><button className="account-text-button is-danger" disabled={!!busy || selected.busy} onClick={() => { if(window.confirm(`退出「${selected.label}」？只清理该账号登录资料，身份和历史保留。`)) void run(selected.accountId,()=>socialAccounts.logout(selected.accountId)); }}>退出账号</button></details>
+          <details className="account-identity-details"><summary>账号身份与资料</summary><dl><dt>本地账号编号</dt><dd>{selected.accountId}</dd><dt>平台账号编号</dt><dd>{hideIdentity ? '身份已隐藏' : selected.externalAccountId || '等待在线核验'}</dd><dt>上次在线核验</dt><dd>{selected.checkedAt ? new Date(selected.checkedAt).toLocaleString('zh-CN') : '尚无成功记录'}</dd></dl></details>
           {selected.platform === 'wechat-oa' && <p className="account-context-note">公众号仅创建草稿，不自动公开。</p>}
         </>}
         {historyId ? <section aria-label="账号登录历史" className="account-activity"><div className="account-activity-heading"><h3>{isDefaultHistory ? '默认账号' : '最近'} · 登录记录</h3><button className="account-text-button" onClick={() => void history(historyId)}>刷新记录</button></div>{historyBusy ? <p role="status">正在读取登录记录…</p> : <LoginHistory events={events}/>}</section> : <div className="account-inspector-empty"><div className="account-activity-art"><IconClock size={26}/><span/><span/></div><h3>每一次连接，都有迹可循。</h3><p>从左侧选择一个账号，查看登录、核验和退出记录。</p><span>按账号记录 · 刷新后保留</span></div>}

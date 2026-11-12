@@ -36,7 +36,7 @@ async function fixture(t, { rawCache } = {}) {
   const state = {
     requests: [], start: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
     read: async () => snapshot('qr_ready', '', '_login/synthetic-current.png'),
-    sms: async () => ({ ok: true }), cancel: async () => ({ cancelled: true, state: 'cancelled' }), analyzed: 0, whoamiCalls: 0,
+    sms: async () => ({ ok: true }), cancel: async () => ({ cancelled: true, state: 'cancelled' }), logout: async () => ({ ok: true, deleted: [] }), analyzed: 0, whoamiCalls: 0,
     accountRows: accounts, whoami: () => ({ loggedIn: true, verified: true, checkedAt: Date.now(), name: 'Synthetic account', avatar: '' }),
   };
   t.mock.method(globalThis, 'fetch', async (url, options) => {
@@ -45,6 +45,7 @@ async function fixture(t, { rawCache } = {}) {
     if (url === '/api/social-accounts') return response([]);
     if (url === '/api/social-accounts/default-history') return response([]);
     if (url === '/api/accounts') return response(state.accountRows);
+    if (url.startsWith('/api/logout/')) return response(await state.logout(url));
     if (url.endsWith('/whoami') || url.endsWith('/whoami?force=true')) { state.whoamiCalls++; return response(await state.whoami()); }
     if (url.endsWith('/sms')) return response(await state.sms());
     if (url.includes('/cancel?')) return response(await state.cancel(url));

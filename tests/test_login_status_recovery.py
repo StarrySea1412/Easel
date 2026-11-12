@@ -24,7 +24,7 @@ def read(env, platform):
     return env['_mp_login_status']() if platform == 'wechat-oa-mp' else env['_login_status'](platform)
 
 
-@pytest.mark.parametrize('platform', ['xiaohongshu', 'wechat-oa-mp'])
+@pytest.mark.parametrize('platform', ['xiaohongshu', 'douyin', 'wechat-oa-mp'])
 @pytest.mark.parametrize('state', ['unknown', 'starting', 'qr_ready', 'scanned', 'sms_required', 'verifying'])
 @pytest.mark.parametrize('code', [0, 1])
 def test_exited_runner_cannot_leave_any_active_phase_polling(status_reader, platform, state, code):
@@ -43,7 +43,7 @@ def test_exited_runner_cannot_leave_any_active_phase_polling(status_reader, plat
     assert (marker.read_bytes(), qr.read_bytes()) == before
 
 
-@pytest.mark.parametrize('platform', ['xiaohongshu', 'wechat-oa-mp'])
+@pytest.mark.parametrize('platform', ['xiaohongshu', 'douyin', 'wechat-oa-mp'])
 @pytest.mark.parametrize('state', ['success', 'expired', 'error'])
 def test_terminal_status_preserves_reason_but_never_exposes_stale_qr(status_reader, platform, state):
     env = status_reader

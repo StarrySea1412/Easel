@@ -23,3 +23,29 @@ test('saved default account opens its original management dialog from the unifie
   assert.doesNotMatch(h.container.textContent, /测试默认知乎/);
   assert.equal(h.state.requests.some(request => request.method !== 'GET'), false);
 });
+
+test('default account exit is visible in main actions and requires explicit confirmation for that platform', async t => {
+  const now = Date.now();
+  const h = await fixture(t, { rawCache: JSON.stringify({ zhihu: {
+    loggedIn: true, verified: true, checkedAt: now, ts: now, name: '测试默认知乎', avatar: '',
+  } }) });
+  const row = h.container.querySelector('[aria-label="查看默认账号 知乎"]');
+  await act(async () => row.click());
+  const exit = h.container.querySelector('.account-inspector-actions .account-logout-button');
+  assert.equal(exit.textContent, '退出账号');
+  assert.equal(exit.closest('details'), null);
+  await act(async () => exit.click());
+  const dialog = h.container.querySelector('.account-management-dialog');
+  assert.equal(dialog.open, true);
+  assert.match(dialog.querySelector('.account-logout-confirm').textContent, /确认退出 知乎/);
+  assert.equal(h.state.requests.some(request => request.method !== 'GET'), false);
+  await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === '关闭').click());
+  assert.equal(dialog.open, false);
+  assert.equal(h.state.requests.some(request => request.url.startsWith('/api/logout/')), false);
+  await act(async () => exit.click());
+  await act(async () => [...dialog.querySelectorAll('button')].find(button => button.textContent === '确认退出并清理登录态').click());
+  assert.deepEqual(h.state.requests.filter(request => request.url.startsWith('/api/logout/')), [
+    { url: '/api/logout/zhihu', method: 'POST' },
+  ]);
+  assert.match(h.container.textContent, /已保存的作品和分析记录仍保留/);
+});
